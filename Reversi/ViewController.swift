@@ -403,6 +403,7 @@ extension ViewController: BoardViewDelegate {
 
 // MARK: Save and Load
 
+
 extension ViewController {
     private var path: String {
         (NSSearchPathForDirectoriesInDomains(.libraryDirectory, .userDomainMask, true).first! as NSString).appendingPathComponent("Game")
@@ -410,98 +411,42 @@ extension ViewController {
     
     /// ゲームの状態をファイルに書き出し、保存します。
     func saveGame() throws {
-        var output: String = ""
-        output += turn.symbol
-        for side in Disk.sides {
-            output += playerControls[side.index].selectedSegmentIndex.description
-        }
-        output += "\n"
-        
-        for y in boardView.yRange {
-            for x in boardView.xRange {
-                output += boardView.diskAt(x: x, y: y).symbol
-            }
-            output += "\n"
-        }
-        
-        do {
-            try output.write(toFile: path, atomically: true, encoding: .utf8)
-        } catch let error {
-            throw FileIOError.read(path: path, cause: error)
-        }
+        try GameState(
+            turn: turn,
+            player1: Player(rawValue: playerControls[Disk.sides[0].index].selectedSegmentIndex)!, // segmentIndexが真の値になっている
+            player2: Player(rawValue: playerControls[Disk.sides[1].index].selectedSegmentIndex)!, // ...
+            board: boardView.yRange.map {y in boardView.xRange.map {x in boardView.diskAt(x: x, y: y)}})
+            .save(to: path)
     }
     
     /// ゲームの状態をファイルから読み込み、復元します。
     func loadGame() throws {
-        let input = try String(contentsOfFile: path, encoding: .utf8)
-        var lines: ArraySlice<Substring> = input.split(separator: "\n")[...]
-        
-        guard var line = lines.popFirst() else {
-            throw FileIOError.read(path: path, cause: nil)
-        }
-        
-        do { // turn
-            guard
-                let diskSymbol = line.popFirst(),
-                let disk = Optional<Disk>(symbol: diskSymbol.description)
-            else {
-                throw FileIOError.read(path: path, cause: nil)
-            }
-            turn = disk
-        }
+        do {
+            let s = try GameState(from: path)
+            guard let turn = s.turn else { throw GameState.FileIOError.read(path: path, cause: nil) }
+            self.turn = turn
 
-        // players
-        for side in Disk.sides {
-            guard
-                let playerSymbol = line.popFirst(),
-                let playerNumber = Int(playerSymbol.description),
-                let player = Player(rawValue: playerNumber)
-            else {
-                throw FileIOError.read(path: path, cause: nil)
-            }
-            playerControls[side.index].selectedSegmentIndex = player.rawValue
-        }
+            playerControls[Disk.sides[0].index].selectedSegmentIndex = s.player1.rawValue
+            playerControls[Disk.sides[1].index].selectedSegmentIndex = s.player2.rawValue
 
-        do { // board
-            guard lines.count == boardView.height else {
-                throw FileIOError.read(path: path, cause: nil)
-            }
-            
-            var y = 0
-            while let line = lines.popFirst() {
-                var x = 0
-                for character in line {
-                    let disk = Disk?(symbol: "\(character)").flatMap { $0 }
+            guard s.board.count == boardView.height,
+                (s.board.allSatisfy {$0.count == boardView.width}) else { throw GameState.FileIOError.read(path: path, cause: nil) }
+            s.board.enumerated().forEach { y, row in
+                row.enumerated().forEach { x, disk in
                     boardView.setDisk(disk, atX: x, y: y, animated: false)
-                    x += 1
                 }
-                guard x == boardView.width else {
-                    throw FileIOError.read(path: path, cause: nil)
-                }
-                y += 1
-            }
-            guard y == boardView.height else {
-                throw FileIOError.read(path: path, cause: nil)
             }
         }
-
         updateMessageViews()
         updateCountLabels()
-    }
-    
-    enum FileIOError: Error {
-        case write(path: String, cause: Error?)
-        case read(path: String, cause: Error?)
     }
 }
 
 // MARK: Additional types
 
-extension ViewController {
-    enum Player: Int {
-        case manual = 0
-        case computer = 1
-    }
+enum Player: Int {
+    case manual = 0
+    case computer = 1
 }
 
 final class Canceller {
@@ -542,32 +487,6 @@ extension Disk {
         switch self {
         case .dark: return 0
         case .light: return 1
-        }
-    }
-}
-
-extension Optional where Wrapped == Disk {
-    fileprivate init?<S: StringProtocol>(symbol: S) {
-        switch symbol {
-        case "x":
-            self = .some(.dark)
-        case "o":
-            self = .some(.light)
-        case "-":
-            self = .none
-        default:
-            return nil
-        }
-    }
-    
-    fileprivate var symbol: String {
-        switch self {
-        case .some(.dark):
-            return "x"
-        case .some(.light):
-            return "o"
-        case .none:
-            return "-"
         }
     }
 }
