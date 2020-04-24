@@ -92,6 +92,11 @@ extension ViewController {
         if diskCoordinates.isEmpty {
             throw DiskPlacementError(disk: disk, x: x, y: y)
         }
+
+        let completion: ((Bool) -> Void) = {
+            self.gameState = GameState(turn: self.gameState.turn, player1: self.gameState.player1, player2: self.gameState.player2, boardView: self.boardView)
+            completion?($0)
+        }
         
         if isAnimated {
             let cleanUp: () -> Void = { [weak self] in
@@ -100,14 +105,12 @@ extension ViewController {
             animationCanceller = Canceller(cleanUp)
             animateSettingDisks(at: [(x, y)] + diskCoordinates, to: disk) { [weak self] isFinished in
                 guard let self = self else { return }
-                self.gameState = GameState(turn: self.gameState.turn, player1: self.gameState.player1, player2: self.gameState.player2, boardView: self.boardView)
-
                 guard let canceller = self.animationCanceller else { return }
                 if canceller.isCancelled { return }
                 cleanUp()
 
                 // このcompletionは呼ばれないことがあってもいいのか？？意図的？
-                completion?(isFinished)
+                completion(isFinished)
             }
         } else {
             DispatchQueue.main.async { [weak self] in
@@ -116,8 +119,7 @@ extension ViewController {
                 for (x, y) in diskCoordinates {
                     self.boardView.setDisk(disk, atX: x, y: y, animated: false)
                 }
-                completion?(true)
-                self.gameState = GameState(turn: self.gameState.turn, player1: self.gameState.player1, player2: self.gameState.player2, boardView: self.boardView)
+                completion(true)
             }
         }
     }

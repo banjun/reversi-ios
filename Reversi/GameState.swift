@@ -162,6 +162,7 @@ extension GameState {
     func save(to path: String) throws {
         do {
             try serialized.write(toFile: path, atomically: true, encoding: .utf8)
+            NSLog("%@", serialized) // ターンを変えるときとdiskを置いたときに呼ばれて，実は整合性がない可能性がある
         } catch let error {
             throw FileIOError.read(path: path, cause: error)
         }
