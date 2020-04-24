@@ -1,10 +1,31 @@
 import Foundation
 
 struct GameState {
+    /// どちらの色のプレイヤーのターンかを表します。ゲーム終了時は `nil` です。
     var turn: Disk?
     var player1: Player
     var player2: Player
     var board: [[Disk?]] // 8x8を仮定している...
+}
+
+extension GameState {
+    static func new(width: Int, height: Int) -> GameState {
+        .init(
+            turn: .dark,
+            player1: .manual,
+            player2: .manual,
+            board: .init(repeating: .init(repeating: nil, count: width), count: height))
+    }
+}
+
+extension GameState {
+    var currentPlayer: Player? {
+        switch turn {
+        case .dark?: return player1
+        case .light?: return player2
+        case nil: return nil
+        }
+    }
 }
 
 extension GameState {

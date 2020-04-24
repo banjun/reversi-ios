@@ -17,9 +17,13 @@ class ViewController: UIViewController {
     @IBOutlet private var playerControls: [UISegmentedControl]!
     @IBOutlet private var countLabels: [UILabel]!
     @IBOutlet private var playerActivityIndicators: [UIActivityIndicatorView]!
-    
-    /// どちらの色のプレイヤーのターンかを表します。ゲーム終了時は `nil` です。
-    private var turn: Disk? = .dark
+
+    private var gameState: GameState = .new(width: 8, height: 8) { // 8x8 ... IBOutlet ....
+        didSet {
+            playerControls[Disk.sides[0].index].selectedSegmentIndex = gameState.player1.rawValue
+            playerControls[Disk.sides[1].index].selectedSegmentIndex = gameState.player2.rawValue
+        }
+    }
     
     private var animationCanceller: Canceller?
     private var isAnimating: Bool { animationCanceller != nil }
@@ -226,11 +230,7 @@ extension ViewController {
     /// ゲームの状態を初期化し、新しいゲームを開始します。
     func newGame() {
         boardView.reset()
-        turn = .dark
-        
-        for playerControl in playerControls {
-            playerControl.selectedSegmentIndex = Player.manual.rawValue
-        }
+        gameState = .new(width: boardView.width, height: boardView.height)
 
         updateMessageViews()
         updateCountLabels()
@@ -240,12 +240,13 @@ extension ViewController {
     
     /// プレイヤーの行動を待ちます。
     func waitForPlayer() {
-        guard let turn = self.turn else { return }
-        switch Player(rawValue: playerControls[turn.index].selectedSegmentIndex)! {
-        case .manual:
+        switch gameState.currentPlayer {
+        case .manual?:
             break
-        case .computer:
+        case .computer?:
             playTurnOfComputer()
+        case nil:
+            break
         }
     }
     
@@ -253,16 +254,16 @@ extension ViewController {
     /// もし、次のプレイヤーに有効な手が存在しない場合、パスとなります。
     /// 両プレイヤーに有効な手がない場合、ゲームの勝敗を表示します。
     func nextTurn() {
-        guard var turn = self.turn else { return }
+        guard var turn = gameState.turn else { return }
 
         turn.flip()
         
         if validMoves(for: turn).isEmpty {
             if validMoves(for: turn.flipped).isEmpty {
-                self.turn = nil
+                self.gameState.turn = nil
                 updateMessageViews()
             } else {
-                self.turn = turn
+                self.gameState.turn = turn
                 updateMessageViews()
                 
                 let alertController = UIAlertController(
@@ -276,7 +277,7 @@ extension ViewController {
                 present(alertController, animated: true)
             }
         } else {
-            self.turn = turn
+            self.gameState.turn = turn
             updateMessageViews()
             waitForPlayer()
         }
@@ -284,7 +285,7 @@ extension ViewController {
     
     /// "Computer" が選択されている場合のプレイヤーの行動を決定します。
     func playTurnOfComputer() {
-        guard let turn = self.turn else { preconditionFailure() }
+        guard let turn = self.gameState.turn else { preconditionFailure() }
         let (x, y) = validMoves(for: turn).randomElement()!
 
         playerActivityIndicators[turn.index].startAnimating()
@@ -321,7 +322,7 @@ extension ViewController {
     
     /// 現在の状況に応じてメッセージを表示します。
     func updateMessageViews() {
-        switch turn {
+        switch gameState.turn {
         case .some(let side):
             messageDiskSizeConstraint.constant = messageDiskSize
             messageDiskView.disk = side
@@ -378,8 +379,18 @@ extension ViewController {
         if let canceller = playerCancellers[side] {
             canceller.cancel()
         }
+
+        switch side {
+        case Disk.sides[0]:
+            gameState.player1 = Player(rawValue: sender.selectedSegmentIndex)!
+        case Disk.sides[1]:
+            gameState.player2 = Player(rawValue: sender.selectedSegmentIndex)!
+        default:
+            // dark <-> player1, light <-> player2の紐づけ?? Disk.sides??
+            break
+        }
         
-        if !isAnimating, side == turn, case .computer = Player(rawValue: sender.selectedSegmentIndex)! {
+        if !isAnimating, side == gameState.turn, case .computer? = gameState.currentPlayer {
             playTurnOfComputer()
         }
     }
@@ -391,12 +402,18 @@ extension ViewController: BoardViewDelegate {
     /// - Parameter x: セルの列です。
     /// - Parameter y: セルの行です。
     func boardView(_ boardView: BoardView, didSelectCellAtX x: Int, y: Int) {
-        guard let turn = turn else { return }
         if isAnimating { return }
-        guard case .manual = Player(rawValue: playerControls[turn.index].selectedSegmentIndex)! else { return }
-        // try? because doing nothing when an error occurs
-        try? placeDisk(turn, atX: x, y: y, animated: true) { [weak self] _ in
-            self?.nextTurn()
+
+        // turnとplayerがセットである疑惑がある...
+        switch gameState.currentPlayer {
+        case .manual?:
+            guard let turn = gameState.turn else { return } //
+            // try? because doing nothing when an error occurs
+            try? placeDisk(turn, atX: x, y: y, animated: true) { [weak self] _ in
+                self?.nextTurn()
+            }
+        case .computer?, nil:
+            break
         }
     }
 }
@@ -412,9 +429,9 @@ extension ViewController {
     /// ゲームの状態をファイルに書き出し、保存します。
     func saveGame() throws {
         try GameState(
-            turn: turn,
-            player1: Player(rawValue: playerControls[Disk.sides[0].index].selectedSegmentIndex)!, // segmentIndexが真の値になっている
-            player2: Player(rawValue: playerControls[Disk.sides[1].index].selectedSegmentIndex)!, // ...
+            turn: gameState.turn,
+            player1: gameState.player1,
+            player2: gameState.player2,
             board: boardView.yRange.map {y in boardView.xRange.map {x in boardView.diskAt(x: x, y: y)}})
             .save(to: path)
     }
@@ -423,11 +440,8 @@ extension ViewController {
     func loadGame() throws {
         do {
             let s = try GameState(from: path)
-            guard let turn = s.turn else { throw GameState.FileIOError.read(path: path, cause: nil) }
-            self.turn = turn
-
-            playerControls[Disk.sides[0].index].selectedSegmentIndex = s.player1.rawValue
-            playerControls[Disk.sides[1].index].selectedSegmentIndex = s.player2.rawValue
+            guard s.turn != nil else { throw GameState.FileIOError.read(path: path, cause: nil) }
+            self.gameState = s
 
             guard s.board.count == boardView.height,
                 (s.board.allSatisfy {$0.count == boardView.width}) else { throw GameState.FileIOError.read(path: path, cause: nil) }
