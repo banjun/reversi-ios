@@ -9,12 +9,12 @@ struct GameState {
 }
 
 extension GameState {
-    static func new(width: Int, height: Int) -> GameState {
-        .init(
-            turn: .dark,
-            player1: .manual,
-            player2: .manual,
-            board: .init(repeating: .init(repeating: nil, count: width), count: height))
+    init(turn: Disk? = .dark, player1: Player = .manual, player2: Player = .manual, boardView: BoardView) {
+        self.init(
+            turn: turn,
+            player1: player1,
+            player2: player2,
+            board: boardView.yRange.map {y in boardView.xRange.map {x in boardView.diskAt(x: x, y: y)}})
     }
 }
 

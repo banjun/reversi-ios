@@ -18,10 +18,16 @@ class ViewController: UIViewController {
     @IBOutlet private var countLabels: [UILabel]!
     @IBOutlet private var playerActivityIndicators: [UIActivityIndicatorView]!
 
-    private var gameState: GameState = .new(width: 8, height: 8) { // 8x8 ... IBOutlet ....
+    // 状態を変えるイベントは， gameState.boardを変えつつ，boardViewを変える，という1 input 2 outpusをする必要がある (setDisk)
+    private var gameState: GameState = .init(turn: nil, player1: .manual, player2: .manual, board: [[]]) { // ... IBOutlet ....
         didSet {
+            try? saveGame()
+
             playerControls[Disk.sides[0].index].selectedSegmentIndex = gameState.player1.rawValue
             playerControls[Disk.sides[1].index].selectedSegmentIndex = gameState.player2.rawValue
+
+            updateCountLabels()
+            updateMessageViews()
         }
     }
     
@@ -174,13 +180,14 @@ extension ViewController {
             animationCanceller = Canceller(cleanUp)
             animateSettingDisks(at: [(x, y)] + diskCoordinates, to: disk) { [weak self] isFinished in
                 guard let self = self else { return }
+                self.gameState = GameState(turn: self.gameState.turn, player1: self.gameState.player1, player2: self.gameState.player2, boardView: self.boardView)
+
                 guard let canceller = self.animationCanceller else { return }
                 if canceller.isCancelled { return }
                 cleanUp()
 
+                // このcompletionは呼ばれないことがあってもいいのか？？意図的？
                 completion?(isFinished)
-                try? self.saveGame()
-                self.updateCountLabels()
             }
         } else {
             DispatchQueue.main.async { [weak self] in
@@ -190,8 +197,7 @@ extension ViewController {
                     self.boardView.setDisk(disk, atX: x, y: y, animated: false)
                 }
                 completion?(true)
-                try? self.saveGame()
-                self.updateCountLabels()
+                self.gameState = GameState(turn: self.gameState.turn, player1: self.gameState.player1, player2: self.gameState.player2, boardView: self.boardView)
             }
         }
     }
@@ -230,12 +236,7 @@ extension ViewController {
     /// ゲームの状態を初期化し、新しいゲームを開始します。
     func newGame() {
         boardView.reset()
-        gameState = .new(width: boardView.width, height: boardView.height)
-
-        updateMessageViews()
-        updateCountLabels()
-        
-        try? saveGame()
+        self.gameState = GameState(boardView: boardView)
     }
     
     /// プレイヤーの行動を待ちます。
@@ -261,10 +262,8 @@ extension ViewController {
         if validMoves(for: turn).isEmpty {
             if validMoves(for: turn.flipped).isEmpty {
                 self.gameState.turn = nil
-                updateMessageViews()
             } else {
                 self.gameState.turn = turn
-                updateMessageViews()
                 
                 let alertController = UIAlertController(
                     title: "Pass",
@@ -278,7 +277,6 @@ extension ViewController {
             }
         } else {
             self.gameState.turn = turn
-            updateMessageViews()
             waitForPlayer()
         }
     }
@@ -374,8 +372,6 @@ extension ViewController {
     @IBAction func changePlayerControlSegment(_ sender: UISegmentedControl) {
         let side: Disk = Disk(index: playerControls.firstIndex(of: sender)!)
         
-        try? saveGame()
-        
         if let canceller = playerCancellers[side] {
             canceller.cancel()
         }
@@ -428,12 +424,7 @@ extension ViewController {
     
     /// ゲームの状態をファイルに書き出し、保存します。
     func saveGame() throws {
-        try GameState(
-            turn: gameState.turn,
-            player1: gameState.player1,
-            player2: gameState.player2,
-            board: boardView.yRange.map {y in boardView.xRange.map {x in boardView.diskAt(x: x, y: y)}})
-            .save(to: path)
+        try gameState.save(to: path)
     }
     
     /// ゲームの状態をファイルから読み込み、復元します。
@@ -441,18 +432,16 @@ extension ViewController {
         do {
             let s = try GameState(from: path)
             guard s.turn != nil else { throw GameState.FileIOError.read(path: path, cause: nil) }
-            self.gameState = s
 
             guard s.board.count == boardView.height,
                 (s.board.allSatisfy {$0.count == boardView.width}) else { throw GameState.FileIOError.read(path: path, cause: nil) }
+            self.gameState = s
             s.board.enumerated().forEach { y, row in
                 row.enumerated().forEach { x, disk in
                     boardView.setDisk(disk, atX: x, y: y, animated: false)
                 }
             }
         }
-        updateMessageViews()
-        updateCountLabels()
     }
 }
 
